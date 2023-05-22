@@ -1,29 +1,168 @@
-import {wait} from '../src/wait'
-import * as process from 'process'
-import * as cp from 'child_process'
-import * as path from 'path'
-import {expect, test} from '@jest/globals'
+import {run, request} from '../src/main'
+import * as core from '@actions/core'
+import nock from 'nock'
 
-test('throws invalid number', async () => {
-  const input = parseInt('foo', 10)
-  await expect(wait(input)).rejects.toThrow('milliseconds not a number')
+const currentsApiUrl = 'http://localhost:4000/v1'
+const currentsApiCancelationPath = '/runs/cancel-by-github-ci'
+const githubRunId = '45166321'
+const githubRunAttempt = '1'
+
+describe('input validation', () => {
+  test('currents-api-url is required', async () => {
+    const spy = jest.spyOn(core, 'setFailed')
+
+    await run()
+
+    expect(spy).toHaveBeenCalledWith(
+      'Input required and not supplied: currents-api-url'
+    )
+  })
+
+  test('bearer-token is required', async () => {
+    process.env['INPUT_CURRENTS-API-URL'] = currentsApiUrl
+
+    const spy = jest.spyOn(core, 'setFailed')
+
+    await run()
+
+    expect(spy).toHaveBeenCalledWith(
+      'Input required and not supplied: bearer-token'
+    )
+  })
+
+  test('github-run-id is required', async () => {
+    process.env['INPUT_CURRENTS-API-URL'] = currentsApiUrl
+    process.env['INPUT_BEARER-TOKEN'] = 'bearer-token'
+
+    const spy = jest.spyOn(core, 'setFailed')
+
+    await run()
+
+    expect(spy).toHaveBeenCalledWith(
+      'Input required and not supplied: github-run-id'
+    )
+  })
+
+  test('github-run-attempt is required', async () => {
+    process.env['INPUT_CURRENTS-API-URL'] = currentsApiUrl
+    process.env['INPUT_BEARER-TOKEN'] = 'bearer-token'
+    process.env['INPUT_GITHUB-RUN-ID'] = githubRunId
+
+    const spy = jest.spyOn(core, 'setFailed')
+
+    await run()
+
+    expect(spy).toHaveBeenCalledWith(
+      'Input required and not supplied: github-run-attempt'
+    )
+  })
 })
 
-test('wait 500 ms', async () => {
-  const start = new Date()
-  await wait(500)
-  const end = new Date()
-  var delta = Math.abs(end.getTime() - start.getTime())
-  expect(delta).toBeGreaterThan(450)
-})
+describe('api request', () => {
+  beforeEach(() => {
+    process.env['INPUT_CURRENTS-API-URL'] = currentsApiUrl
+    process.env['INPUT_BEARER-TOKEN'] = 'bearer-token'
+    process.env['INPUT_GITHUB-RUN-ID'] = githubRunId
+    process.env['INPUT_GITHUB-RUN-ATTEMPT'] = githubRunAttempt
+  })
 
-// shows how the runner will run a javascript action with env / stdout protocol
-test('test runs', () => {
-  process.env['INPUT_MILLISECONDS'] = '500'
-  const np = process.execPath
-  const ip = path.join(__dirname, '..', 'lib', 'main.js')
-  const options: cp.ExecFileSyncOptions = {
-    env: process.env
-  }
-  console.log(cp.execFileSync(np, [ip], options).toString())
+  afterEach(() => {
+    delete process.env['INPUT_CURRENTS-API-URL']
+    delete process.env['INPUT_BEARER-TOKEN']
+    delete process.env['INPUT_GITHUB-RUN-ID']
+    delete process.env['INPUT_GITHUB-RUN-ATTEMPT']
+  })
+
+  test('should resolve when status code is not 200', () => {
+    const error = JSON.stringify({
+      error: 'Invalid params'
+    })
+    nock(currentsApiUrl).put(currentsApiCancelationPath).reply(400, error)
+    expect(
+      request({
+        url: `${currentsApiUrl}${currentsApiCancelationPath}`,
+        body: {
+          githubRunId,
+          githubRunAttempt
+        },
+        bearerToken: 'token'
+      })
+    ).rejects.toThrowError(error)
+  })
+
+  test('should fail when status code is 404', async () => {
+    nock(currentsApiUrl).put(currentsApiCancelationPath).reply(404, {})
+    const spy = jest.spyOn(core, 'setFailed')
+
+    await run()
+    expect(spy).toHaveBeenCalledWith('Resource not found')
+  })
+
+  test('should retry when status code is 500', async () => {
+    nock(currentsApiUrl).put(currentsApiCancelationPath).reply(500)
+    const spy = jest.spyOn(core, 'setFailed')
+
+    await run()
+    expect(spy).toBeCalled()
+  }, 15000)
+
+  test('should fail when the input is invalid', async () => {
+    process.env['INPUT_CURRENTS-API-URL'] = 'bad url'
+    const spy = jest.spyOn(core, 'setFailed')
+
+    await run()
+    expect(spy).toHaveBeenCalledWith(expect.any(String))
+  })
+
+  test('should return the result when status code is 200', () => {
+    const result = {
+      githubRunId,
+      githubRunAttempt,
+      status: 'OK',
+      actor: 'api',
+      canceledAt: new Date().toDateString(),
+      reason: 'api call'
+    }
+
+    nock(currentsApiUrl).put(currentsApiCancelationPath).reply(200, result)
+
+    expect(
+      request({
+        url: `${currentsApiUrl}${currentsApiCancelationPath}`,
+        body: {
+          githubRunId,
+          githubRunAttempt
+        },
+        bearerToken: 'token'
+      })
+    ).resolves.toEqual({
+      headers: {
+        'content-type': 'application/json'
+      },
+      result,
+      statusCode: 200
+    })
+  })
+
+  test('should show the result when debug is enabled', async () => {
+    const result = {
+      githubRunId,
+      githubRunAttempt,
+      status: 'OK',
+      actor: 'api',
+      canceledAt: new Date().toDateString(),
+      reason: 'api call'
+    }
+
+    const spy = jest.spyOn(core, 'debug')
+
+    // enable debug
+    process.env['RUNNER_DEBUG'] = '1'
+
+    nock(currentsApiUrl).put(currentsApiCancelationPath).reply(200, result)
+
+    await run()
+
+    expect(spy).toHaveBeenCalled()
+  })
 })

@@ -2,8 +2,12 @@ module.exports = {
   clearMocks: true,
   moduleFileExtensions: ['js', 'ts'],
   testMatch: ['**/*.test.ts'],
+  verbose: true,
+  preset: 'ts-jest',
   transform: {
-    '^.+\\.ts$': 'ts-jest'
+    '^.+\\.(ts|tsx)?$': 'ts-jest',
+    '^.+\\.(js|jsx)$': 'babel-jest'
   },
-  verbose: true
+  testEnvironment: 'node',
+  transformIgnorePatterns: ['node_modules/(?!@p-retry)/']
 }

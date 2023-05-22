@@ -2,19 +2,44 @@
   <a href="https://github.com/actions/typescript-action/actions"><img alt="typescript-action status" src="https://github.com/actions/typescript-action/workflows/build-test/badge.svg"></a>
 </p>
 
-# Create a JavaScript Action using TypeScript
+# Cancel Currents run action
 
-Use this template to bootstrap the creation of a TypeScript action.:rocket:
+This action cancels the current cypress run by calling the Currents API.
 
-This template includes compilation support, tests, a validation workflow, publishing, and versioning guidance.  
+## Inputs
 
-If you are new, there's also a simpler introduction.  See the [Hello World JavaScript Action](https://github.com/actions/hello-world-javascript-action)
+### `currents-api-url`
 
-## Create an action from this template
+Currents API URL. Default value is `https://api.currents.dev/api/v1`
 
-Click the `Use this Template` and provide the new repo details for your action
+### `bearer-token`
 
-## Code in Main
+**Required** Bearer authorization token.
+
+### `github-run-id`
+
+**Required** GitHub run id.
+
+### `github-run-attempt`
+
+**Required** GitHub run attempt.
+
+## Example usage
+
+```yaml
+- name: Cancel the run if workflow is cancelled
+  if: ${{ cancelled() }}
+  uses: currents-dev/cancel-run-action@v1
+  with:
+    bearer-token: ${{ secrets.CURRENTS_API_TOKEN }}
+    github-run-id: ${{ github.run_id }}
+    github-run-attempt: ${{ github.run_attempt }}
+
+```
+
+## Development
+
+The repository is made using [this](https://github.com/actions/typescript-action) template
 
 > First, you'll need to have a reasonably modern version of `node` handy. This won't work with versions older than 9, for instance.
 
@@ -40,7 +65,7 @@ $ npm test
 ...
 ```
 
-## Change action.yml
+### Change action.yml
 
 The action.yml defines the inputs and output for your action.
 
@@ -48,7 +73,7 @@ Update the action.yml with your name, description, inputs and outputs for your a
 
 See the [documentation](https://help.github.com/en/articles/metadata-syntax-for-github-actions)
 
-## Change the Code
+### Change the Code
 
 Most toolkit and CI/CD operations involve async operations so the action is run in an async function.
 
@@ -88,7 +113,7 @@ Your action is now published! :rocket:
 
 See the [versioning documentation](https://github.com/actions/toolkit/blob/master/docs/action-versioning.md)
 
-## Validate
+### Validate
 
 You can now validate the action by referencing `./` in a workflow in your repo (see [test.yml](.github/workflows/test.yml))
 
@@ -100,6 +125,6 @@ with:
 
 See the [actions tab](https://github.com/actions/typescript-action/actions) for runs of this action! :rocket:
 
-## Usage:
+### Usage:
 
 After testing you can [create a v1 tag](https://github.com/actions/toolkit/blob/master/docs/action-versioning.md) to reference the stable and latest V1 action

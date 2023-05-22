@@ -1,18 +1,98 @@
 import * as core from '@actions/core'
-import {wait} from './wait'
+import {HttpClient} from '@actions/http-client'
+import {BearerCredentialHandler} from '@actions/http-client/lib/auth'
+import {TypedResponse} from '@actions/http-client/lib/interfaces'
+import pRetry, {AbortError} from 'p-retry'
 
-async function run(): Promise<void> {
+export type ResponseStatus = 'OK' | 'FAILED'
+export type RunCancellation = {
+  actor: string
+  canceledAt: string
+  reason: string
+}
+export type CancelRunGithubCIRouteParams = {
+  githubRunId: string
+  githubRunAttempt: number
+}
+
+export async function request<A, B>({
+  url,
+  body,
+  bearerToken
+}: {
+  url: string
+  body: A
+  bearerToken: string
+}): Promise<TypedResponse<B>> {
+  const http = new HttpClient('cancel-currents-run-action', [
+    new BearerCredentialHandler(bearerToken)
+  ])
+
+  return http.putJson<B>(url, body)
+}
+
+export async function run(): Promise<void> {
   try {
-    const ms: string = core.getInput('milliseconds')
-    core.debug(`Waiting ${ms} milliseconds ...`) // debug is only output if you set the secret `ACTIONS_STEP_DEBUG` to true
+    const currentsApiUrl = core.getInput('currents-api-url', {
+      required: true
+    })
+    const bearerToken = core.getInput('bearer-token', {required: true})
+    const githubRunId = core.getInput('github-run-id', {required: true})
+    const githubRunAttempt = core.getInput('github-run-attempt', {
+      required: true
+    })
 
-    core.debug(new Date().toTimeString())
-    await wait(parseInt(ms, 10))
-    core.debug(new Date().toTimeString())
+    core.info('Calling the Currents API...')
+    core.info(`GitHub run id: ${githubRunId}`)
+    core.info(`GitHub run attempt: ${githubRunAttempt}`)
 
-    core.setOutput('time', new Date().toTimeString())
+    const result = await pRetry(
+      async () => {
+        const response = await request<
+          {
+            githubRunId: string
+            githubRunAttempt: string
+          },
+          {
+            status: ResponseStatus
+            data: RunCancellation & CancelRunGithubCIRouteParams
+          } | null
+        >({
+          url: `${currentsApiUrl}/runs/cancel-by-github-ci`,
+          bearerToken,
+          body: {
+            githubRunId,
+            githubRunAttempt
+          }
+        })
+
+        if (response.result === null) {
+          throw new AbortError('Resource not found')
+        }
+
+        return response
+      },
+      {
+        retries: 3,
+        minTimeout: 1000,
+        maxTimeout: 10000,
+        onFailedAttempt: error => {
+          core.info(
+            `Attempt ${error.attemptNumber} failed. There are ${error.retriesLeft} retries left.`
+          )
+        }
+      }
+    )
+
+    if (core.isDebug()) {
+      core.debug(JSON.stringify(result))
+    }
+
+    core.info('The run was successfully canceled!')
   } catch (error) {
-    if (error instanceof Error) core.setFailed(error.message)
+    if (error instanceof Error) {
+      core.setFailed(error.message)
+    }
   }
 }
 
